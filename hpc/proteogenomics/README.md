@@ -56,3 +56,9 @@ To run the script simply type `rake`
 ```bash
 	rake
 ```
+
+This script will take a long time to run (days) and will result in two useful `gff3` files.  Both files contain coordinates of peptides in reference to the Trinity.fasta transcriptome.  They can be used to visualise the locations of peptides against transcripts and also to find genuine novel coding sequences not otherwise predicted by trinotate.
+
+	- `novel_pg.gff3` contains peptides identified from 6-frame translations
+	- `known_pg.gff3` contains peptides that match to coding sequences predicted by transdecoder as part of trinotate
+
