@@ -1,0 +1,285 @@
+require 'pathname'
+require 'tmpdir'
+
+# Requirements for this to run
+#
+# transdecoder.fasta : Protein predictions from transdecoder
+# transdecoder.gff3 : Coordinates of proteins in known.fasta on
+# transcriptome_na.fasta
+# transcriptome_na.fasta : Transcriptome Nucleotide sequences
+# *.mzML : Mass Spec data files
+#
+# Working installation of protk > 1.4.3
+# Working installation of msconvert
+
+# Monkey patch rake to ignore timestamps on result files
+class Rake::FileTask
+  def needed?
+    if !File.exist?(name)
+      puts name
+    end
+    !File.exist?(name)
+  end
+end
+
+output_dir = '.'
+ncpus = 4
+
+search_params = {
+  'Elite' => {:f => "0.4", :p=>"20",:tolu=>"ppm",:charges=>"2+,3+ and 4+"},
+  'QE' => {:f => "0.1", :p=>"20",:tolu=>"ppm",:charges=>"2+,3+ and 4+"}
+}
+
+# Assumes transdecoder.fasta already exists
+#
+file "known.fasta" do
+  sh %{cat transdecoder.fasta | sed s/\\>/\\>lcl\\|/ |  sed s/\\|m/\\_m/ > known.fasta}
+end
+
+file "known_decoy.fasta" => "known.fasta" do
+  sh %{make_decoy.rb -P decoy_known_ known.fasta -A -o known_decoy.fasta}
+end
+
+file "known.gff3" do
+  sh %{cat transdecoder.gff3 | sed s/\\|m\\./\\_m\\./g  > known.gff3}
+end
+
+# Assumes transcriptome_na.fasta exists
+#
+file "novel.fasta" do 
+  sh %{sixframe.rb transcriptome_na.fasta --min-len 15 --coords > novel.fasta}
+end
+
+file "novel.gff3" do
+  sh %{sixframe.rb transcriptome_na.fasta --min-len 15 --gff3 > novel.gff3}
+end
+
+file "novel_decoy.fasta" => "novel.fasta" do
+  sh %{make_decoy.rb -P decoy_novel_ novel.fasta -A -o novel_decoy.fasta}
+end
+
+file "merged_decoy.fasta" => ["known_decoy.fasta","novel_decoy.fasta"] do
+  sh %{cat known_decoy.fasta novel_decoy.fasta > merged_decoy.fasta}
+end
+
+task :make_databases => ["merged_decoy.fasta"]
+
+###### ----- ######
+
+task :convert_to_mgf
+
+FileList['*.mzML'].each do |src|
+  basename = File.basename(src,'.mzML')
+  mgf_file = "#{output_dir}/#{basename}.mgf"
+
+  file mgf_file => src do |task|
+    Dir.mktmpdir do |dir|
+      sh %{ msconvert --mgf #{task.prerequisites.first} -o #{dir} }
+      sh %{ mv #{dir}/*.mgf #{mgf_file}}
+    end
+  end
+
+  task :convert_to_mgf => mgf_file
+end
+
+###### ----- ######
+
+task :search => [:convert_to_mgf,:make_databases]
+task :split_psms => :search
+task :peptide_prophet => :split_psms
+
+
+FileList['*.mzML'].each do |src|
+  basename = File.basename(src,'.mzML')
+  mgf_file = "#{output_dir}/#{basename}.mgf"  
+  tandem_raw = "#{output_dir}/#{basename}_tandem_raw.tandem"
+  tandem_pepxml = "#{output_dir}/#{basename}_tandem_raw.pep.xml"
+  tandem_known = "#{output_dir}/#{basename}_tandem_raw_known.pep.xml"
+  tandem_novel = "#{output_dir}/#{basename}_tandem_raw_novel.pep.xml"
+
+  msgf_pepxml = "#{output_dir}/#{basename}_msgfplus_raw.pep.xml"
+  msgf_known = "#{output_dir}/#{basename}_msgfplus_raw_known.pep.xml"
+  msgf_novel = "#{output_dir}/#{basename}_msgfplus_raw_novel.pep.xml" 
+
+  instrument = basename =~ /^Alvaro/ ? "Elite" : "QE"
+
+  f,p,tolu,charges = search_params[instrument].values
+
+  db_file = "merged_decoy.fasta"
+
+
+  file tandem_raw => src do |task|
+    sh %{ 
+      tandem_search.rb -d #{db_file}  \
+      --var-mods='    15.994915__at__M        ' \
+      --fix-mods='    57.021464__at__C    ' \
+      --enzyme='[KR]|{P}' \
+      --precursor-ion-tol-units=#{tolu} \
+      --cleavage-semi \
+      --precursor-ion-tol-units=#{tolu} \
+      -n #{ncpus} -y -m \
+      -v 2 -f #{f} -p #{p} \
+      -o #{tandem_raw} #{src}
+    }
+  end
+
+  file tandem_pepxml => tandem_raw do |task|
+    sh %{tandem_to_pepxml.rb #{tandem_raw}}
+  end
+
+  file msgf_pepxml => src do |task|
+    inst = instrument=="QE" ? "3" : "1"
+    ti = instrument=="QE" ? "-1,2" : "0,1"
+    sh %{
+      msgfplus_search.rb \
+      -d #{db_file} \
+      --var-mods='            O1,M,opt,any,Oxidation        , C2H2O,*,opt,Prot-N-term,Acetyl    '\
+      --fix-mods='    C2H3N1O1,C,opt,any,Carbamidomethyl    '\
+      --enzyme=1      \
+      --precursor-ion-tol-units=#{tolu}       \
+      -p #{p}       \
+      --instrument=#{inst}  \
+      --isotope-error-range=#{ti}     \
+      --fragment-method=0     \
+      --protocol=0      \
+      --min-pep-len=6     \
+      --max-pep-len=40    \
+      --max-pep-charge=3    \
+      --min-pep-charge=1    \
+      --num-reported-matches=1      \
+      --java-mem=12000M \
+      --pepxml \
+      --cleavage-semi \
+      -n #{ncpus} \
+      -o #{msgf_pepxml} #{src}
+    }
+  end
+
+  task :search => [tandem_pepxml,msgf_pepxml]
+
+
+
+  ["tandem","msgfplus"].each do |search_engine|  
+    engine_pepxml = "#{output_dir}/#{basename}_#{search_engine}_raw.pep.xml"
+    engine_known = "#{output_dir}/#{basename}_#{search_engine}_raw_known.pep.xml"
+    engine_novel = "#{output_dir}/#{basename}_#{search_engine}_raw_novel.pep.xml"
+
+    # require 'byebug';byebug
+    experiment_label = basename.match(/([0-9A-Z]+)$/).captures[0]
+
+    file engine_novel => engine_pepxml do |task|
+      sh %{filter_psms.rb 'decoy_novel,frame' #{engine_pepxml} > #{engine_novel}}
+    end
+
+    file engine_known => engine_pepxml do |task|
+      sh %{filter_psms.rb 'decoy_novel,frame' #{engine_pepxml} -R > #{engine_known}}
+    end
+
+    task :split_psms => [engine_known,engine_novel]
+
+    ["known","novel"].each do |subset|
+      subset_pproph = "#{output_dir}/#{basename}_#{search_engine}_pproph_#{subset}.pep.xml"
+      subset_raw = "#{output_dir}/#{basename}_#{search_engine}_raw_#{subset}.pep.xml"
+
+      # We force use of the non-parametric model for novelties because there is just not enough distance between the good/bad distributions in that case
+      # And because the novel category has heaps and heaps of data to work with
+      #
+      non_parametric = ""
+      # if subset=="novel"
+      #   non_parametric="--use-non-parametric-model"
+      # end
+
+      file subset_pproph => subset_raw do |task|
+        sh %{peptide_prophet.rb #{subset_raw} -o #{subset_pproph} -r --decoy-prefix=decoy_#{subset}_ --p-thresh 0.05 --threads #{ncpus} #{non_parametric} --experiment-label #{experiment_label}}
+      end
+
+      task :peptide_prophet => subset_pproph
+    end
+
+    concat_pproph = "#{output_dir}/#{basename}_#{search_engine}_pproph.pep.xml"
+
+    file concat_pproph do |task|
+      sh %{peptide_prophet.rb #{engine_pepxml} -o #{concat_pproph} -r --decoy-prefix=decoy_ --p-thresh 0.05 --threads #{ncpus} --experiment-label #{experiment_label}}
+    end
+
+    task :peptide_prophet => concat_pproph
+
+  end
+
+end
+
+
+task :interprophet => :peptide_prophet
+
+["known","novel"].each do |subset|
+
+  subset_iproph = "#{output_dir}/#{subset}_iproph.pep.xml"
+  subset_protproph = "#{output_dir}/#{subset}.protXML"
+
+  pproph_files = FileList["#{output_dir}/*pproph_#{subset}.pep.xml"]
+
+  file subset_iproph => pproph_files do |task|
+    sh %{interprophet.rb -n #{ncpus} #{pproph_files} -o #{subset_iproph}}
+  end
+
+  task :interprophet => subset_iproph
+
+end
+
+concat_pproph_files = FileList["#{output_dir}/*pproph.pep.xml"]
+concat_iproph = "concat_iproph.pep.xml"
+
+file concat_iproph => concat_pproph_files do |task|
+  sh %{interprophet.rb -n #{ncpus} #{concat_pproph_files} -o #{concat_iproph}}
+end
+
+
+file "combined.protXML" => :interprophet do |task|
+  sh %{protein_prophet.rb --iprophet-input known_iproph.pep.xml novel_iproph.pep.xml -o combined.protXML}
+end
+
+file "concat.protXML" => concat_iproph do |task|
+  sh %{protein_prophet.rb --iprophet-input #{concat_iproph} -o concat.protXML}
+end
+
+task :protein_prophet => ["combined.protXML","concat.protXML"]
+
+
+
+task :map_to_gff => :protein_prophet
+
+["known","novel"].each do |subset|
+  subset_gff = "#{subset}_pg.gff3"
+
+  regex_args = ""
+
+  case subset
+  when "known"
+#TRINITY_DN79_c0_g1::TRINITY_DN79_c0_g1_i1::g.1
+
+#    regex_args << "--gff-idregex='(comp[0-9]+_c[0-9]+_seq[0-9]+_m.[0-9]+)' --ignore-regex='frame'"
+      regex_args << "--gff-idregex='(TRINITY_[A-Z]+[0-9]+_c[0-9]+_g[0-9]+..TRINITY_[A-Z]+[0-9]+_c[0-9]+_g[0-9]+_i[0-9]+..g.[0-9]+..m.[0-9]+)' --ignore-regex='frame'"
+  when "novel"
+    regex_args << "--genome-idregex='(TRINITY_[A-Z]+[0-9]+_c[0-9]+_g[0-9]+_i[0-9]+)' --gff-idregex='(TRINITY_[A-Z]+[0-9]+_c[0-9]+_g[0-9]+_i[0-9]+_frame_[0-9]+_orf_[0-9]+)' --ignore-regex='..m.[0-9]+'"
+  else
+    puts "Unknown subset"
+  end
+
+  file subset_gff => "#{subset}.gff3" do |task|
+    sh %{protxml_to_gff.rb -d #{subset}.fasta -c #{subset}.gff3 combined.protXML #{regex_args} -o #{subset_gff} --debug}
+  end
+
+  task :map_to_gff => subset_gff
+
+end
+
+
+
+task :default => [:map_to_gff]
+
+
+
+
+
+
+
