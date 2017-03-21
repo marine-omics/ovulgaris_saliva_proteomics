@@ -12,7 +12,7 @@ Once these are in place you can run `01_link_files.sh` to create symbolic links 
 ```
 
 With input files in place it is now possible to run the `rake` script which automates all of the proteogenomics steps including
-	
+
 	- File format conversion (with msconvert)
 	- 6-frame and decoy database construction
 	- Tandem MS database search with `xtandem` and `msgfplus`
@@ -37,7 +37,8 @@ A working ruby and rubygems installation.  I recommend using rvm to manage this
 The `protk` ruby gem
 
 ```bash
-	gem install protk
+	brew install libxml2
+	gem install protk -- --with-xml2-config=/usr/local/Cellar/libxml2/2.9.4_2/bin/xml2-config
 ```
 
 The MSGFPlus search engine
@@ -61,4 +62,3 @@ This script will take a long time to run (days) and will result in two useful `g
 
 	- `novel_pg.gff3` contains peptides identified from 6-frame translations
 	- `known_pg.gff3` contains peptides that match to coding sequences predicted by transdecoder as part of trinotate
-
