@@ -1,0 +1,98 @@
+---
+title: "Normalization and EDA"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning = FALSE,error = FALSE,message = FALSE,fig.pos="h")
+library(tidyverse)
+library(limma)
+library(ggrepel)
+library(ggpubr)
+source("R/utils.R")
+```
+
+# Exploration of quantitative data
+
+The idea here is to answer the questions
+
+- Is there significant variation in overall intensity between datasets and should this be normalized
+
+```{r}
+mq_data <- load_mq_annotated()
+sample_data <- readxl::read_excel("raw_data/maxquant/sample_data.xlsx")
+```
+
+Boxplots of iBAQ and LFQ intensities show that there are quite large differences in intensity and that these are correlated with certain sample types.  
+
+```{r}
+mq_data_ibaq_matrix <- mq_data %>% 
+  select(contains('iBAQ ')) %>% 
+  log2 %>% 
+  cbind(mq_data %>% select(prot_id)) %>% 
+  gather(sample,intensity,-prot_id) %>% 
+  add_column(measurement='iBAQ')
+
+
+mq_data_lfq_matrix <- mq_data %>% 
+  select(contains('LFQ intensity ')) %>% 
+  log2 %>% 
+  cbind(mq_data %>% select(prot_id)) %>% 
+  gather(sample,intensity,-prot_id) %>% 
+  add_column(measurement='LFQ')
+
+mq_data_raw_intensities <- rbind(mq_data_ibaq_matrix,mq_data_lfq_matrix) %>% 
+  mutate(sample = extract_sample_codes(sample)) %>% 
+  filter(!is.na(intensity)) %>% 
+  left_join(sample_data,by=c("sample"="sample_code"))
+
+gp_rawi <- ggplot(mq_data_raw_intensities,aes(x=reorder(sample,sample_order),y=intensity)) + 
+  geom_boxplot(aes(color=sample_type)) + 
+  facet_wrap(~measurement) + 
+  theme_pubclean() +
+  theme(axis.text.x = element_text(size=8,angle=90), legend.title = element_blank(), legend.position = "bottom") + 
+  xlab("") + ylab("Value")
+
+ggsave(gp_rawi,filename = "figures/raw_boxplot.pdf",width=170,height=120, units = "mm")
+```
+
+LFQ measurements are probably suitable for normalization as they are already fairly close and since they are typically used for inter-sample comparisons. We don't normalize iBAQ since it is primarily for between protein comparisons.
+
+Now we wish to make a PCA based on the normalized LFQ data.
+
+```{r}
+
+mq_data_lfq_lognorm_matrix <- lognorm_lfq(mq_data) %>% 
+  select(prot_id,contains('LFQ intensity ')) %>% 
+  column_to_rownames("prot_id") %>% 
+  as.matrix()
+  
+mds <- plotMDS(mq_data_lfq_lognorm_matrix,plot = FALSE)
+
+
+
+mds_data <- data.frame(x=mds$x,y=mds$y) %>% 
+  rownames_to_column("sample") %>% 
+  mutate(sample = extract_sample_codes(sample)) %>% 
+  left_join(sample_data,by=c("sample"="sample_code"))
+
+ggplot(mds_data,aes(x=x,y=y)) + 
+  geom_point(aes(color=sample_type)) + 
+  geom_label_repel(aes(label=sample))
+
+p_pca <- ggplot(mds_data,aes(x=x,y=y)) + 
+  geom_point(aes(color=sample_type)) + 
+#  geom_label_repel(aes(label=sample),size=1) +
+  theme_pubclean() +
+  theme(legend.position = "right") +
+  theme(text = element_text(size=6), legend.title = element_blank()) +
+  theme(legend.text = element_text(size=6)) +
+  xlab("Leading log2 fold change dim 1") +
+  ylab("Leading log2 fold change dim 2") 
+  
+  
+
+ggsave(p_pca,filename = "figures/sample_pca.pdf",width=80,height=60, units = "mm")
+
+```
+

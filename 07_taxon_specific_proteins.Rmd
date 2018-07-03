@@ -1,0 +1,48 @@
+---
+title: "Taxon Specific Proteins"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+source("R/utils.R")
+```
+
+Is there enrichment for cephalopod specific proteins among the novel set?
+
+```{r}
+cephalopod_specific <- load_ceph_specific()
+
+novels_in_background <- sum(grepl(all_ids,pattern = "frame"))
+total_background <- length(all_ids)
+
+novels_in_ceph_specific <- sum(grepl(cephalopod_specific,pattern = "frame"))
+total_ceph_specific <- length(cephalopod_specific)
+
+contingency_table <- matrix(c(novels_in_ceph_specific,novels_in_background,total_ceph_specific-novels_in_ceph_specific,total_background-novels_in_background),nrow = 2,byrow = FALSE,dimnames = list( c("Novel","NonNovel"), c("Specific","General")))
+
+fisher.test(contingency_table)
+```
+
+Are taxon specific proteins more likely to be cysteine rich?
+
+```{r}
+# Pull in the annotations data
+mq_data_annotated <- load_mq_annotated() %>% 
+  mutate(is_ceph_specific = ifelse(prot_id %in% cephalopod_specific,"YES","NO")) %>% 
+  mutate(cysteine_density= cysteine_count/`Sequence length`) %>% 
+  select(is_ceph_specific,cysteine_density,max_cysteines,group_id,prot_id,`Sequence length`,contains("LFQ intensity")) %>% 
+  group_by(group_id) %>% summarise_all(agg_fun) %>% 
+  mutate(is_ceph_specific=ifelse(is_ceph_specific=="NO","NO","YES"))
+
+ggplot(mq_data_annotated,aes(x=max_cysteines)) + stat_density(aes(color=is_ceph_specific), geom = "line", n = 8)
+```
+
+
+Are taxon specific proteins more likely to be short
+
+```{r}
+ggplot(mq_data_annotated,aes(x=`Sequence length`)) + geom_density(aes(color=is_ceph_specific))
+```
+

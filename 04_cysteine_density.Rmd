@@ -1,0 +1,143 @@
+---
+title: "R Notebook"
+output: html_document
+---
+
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(stringr)
+```
+
+This plot demonstrates that the peak cysteine density for toxin databases is around 6
+
+```{r}
+read_cysteine_richness <- function(path){
+  database <- basename(path) %>% str_extract("[^_]*")
+  window_size <- (basename(path) %>% str_match(pattern = "dens_(.*).tsv"))[,2]
+  if ( window_size == "def"){
+    window_size <- "30"
+  }
+  read_tsv(path,col_names = c("name","max_cysteines","knot")) %>% 
+    add_column(database = database) %>% 
+    add_column(window_size = window_size)
+}
+
+input_files <- list.files("raw_data/cysteine_richness/",pattern = "*.tsv",full.names = TRUE)
+
+cr_data <- do.call(rbind,lapply(input_files,read_cysteine_richness))
+
+database_names <- c("arachno"="ArachnoServer","swisspr"="SwissProt","unipr"="ToxProt")
+database_order <- c("arachno"=1,"swisspr"=3,"unipr"=2)
+
+cr_data_plottable <- cr_data %>% 
+  mutate(database_order = database_order[database]) %>% 
+  mutate(database = database_names[database]) 
+
+cr_data_plottable$window_size <- factor(cr_data_plottable$window_size,levels = c("12","30","50","100"))
+
+db_cys_plot <- ggplot(cr_data_plottable,aes(x=max_cysteines)) +
+  stat_density(aes(color=window_size),adjust=1,n=16,geom="line") + 
+  facet_wrap(~reorder(database,database_order),ncol=1, scales = "free_y") + 
+  xlim(0,11) + 
+  theme_pubclean_adp() +
+  theme(legend.position = "bottom") +
+  labs(colour= "Window Size") +
+  xlab("Cysteine Richness Index (CRI)") +
+  ylab("Density of Sequences") + 
+  theme(text = element_text(size=6))
+
+
+ggsave(db_cys_plot, filename = "figures/db_cyst_plot.png", width = 8.3, height = 10, units = "cm")  
+```
+
+
+```{r}
+read_cysteine_density <- function(path){
+  database <- basename(path) %>% str_extract("[^_]*")
+  read_tsv(path,col_names = c("name","cysteine_density", "length")) %>% 
+    add_column(database = database) 
+}
+
+d_input_files <- list.files("raw_data/cysteine_richness/overall_density/",pattern = "*.tsv",full.names = TRUE)
+
+cd_data <- do.call(rbind,lapply(d_input_files,read_cysteine_density)) %>% 
+  mutate(database_order = database_order[database]) %>% 
+  mutate(database = database_names[database]) 
+
+all_data <- cr_data_plottable %>% 
+  left_join(cd_data) %>% 
+  na.omit() %>% 
+  group_by(database,window_size) %>% 
+  sample_n(1500)
+
+
+ggplot(all_data %>% filter(window_size==30),aes(x=max_cysteines, group = database)) +
+  stat_density(adjust=1,n=16,geom="line") + 
+    facet_wrap(~database,ncol=1, scales = "free_y") + 
+  xlim(0,16) + 
+  theme_pubclean() +
+  theme(legend.position = "bottom") +
+  labs(colour= "Database") +
+  xlab("Max Cysteines within Window") +
+  ylab("Density of Sequences") + 
+  theme(text = element_text(size=6))
+
+```
+
+
+```{r}
+ggplot(all_data %>% filter(window_size==30),aes(x=cysteine_density, group = database)) +
+  stat_density(adjust=1,n=16,geom="line") + 
+    facet_wrap(~database,ncol=1, scales = "free_y") + 
+  xlim(0,0.2) + 
+  theme_pubclean() +
+  theme(legend.position = "bottom") +
+  labs(colour= "Database") +
+  xlab("Max Cysteines within Window") +
+  ylab("Density of Sequences") + 
+  theme(text = element_text(size=6))
+```
+
+
+```{r}
+mds_data <- all_data %>% 
+  ungroup() %>% 
+  filter(window_size==30) %>% 
+  select(name,database,cysteine_density,max_cysteines) %>% 
+  unite("id",name,database,sep=";;") %>% 
+  column_to_rownames("id") %>% 
+  as.data.frame()
+
+pca_data <- prcomp(t(mds_data))$rotation %>% as.data.frame() %>% 
+  rownames_to_column("id") %>% 
+  separate(id,c("name","database"),sep = ";;")
+
+ggplot(pca_data,aes(x=PC1)) + stat_density(aes(color=database),geom="line", n=8)
+```
+
+
+
+```{r}
+#adaptation of the theme_pubclean function which alters the linetype and colour of the y major gridlines 
+
+theme_pubclean_adp <- function (base_size = 12, base_family = "", flip = FALSE) 
+{
+    res <- theme_grey(base_size = base_size, base_family = base_family) + 
+        theme(panel.background = element_rect(fill = "white"), 
+            legend.background = element_rect(fill = "white"), 
+            legend.position = "top")
+    if (flip) {
+        res <- res + theme(panel.grid.major.x = element_line(linetype = "dotted", 
+            color = "grey"), axis.line.y = element_line(color = "black"))
+    }
+    else {
+        res <- res + theme(panel.grid.major.y = element_line(linetype = "dashed", color = "gray91"))
+    }
+    res
+}
+
+```
+

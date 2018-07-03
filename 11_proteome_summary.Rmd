@@ -1,0 +1,34 @@
+---
+title: "Summary"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning = FALSE,error = FALSE,message = FALSE,fig.pos="h")
+library(tidyverse)
+source("R/utils.R")
+
+#source("https://bioconductor.org/biocLite.R")
+#biocLite("preprocessCore")
+```
+
+
+# Summary stats on proteome wide level
+
+```{r}
+mq_data <- load_mq_annotated()
+sample_data <- readxl::read_excel("raw_data/maxquant/sample_data.xlsx")
+```
+
+How many protein groups are there
+
+```{r}
+mq_data %>% pull(group_id) %>% n_distinct()
+```
+
+```{r}
+short_proteins <- mq_data %>% filter(`Sequence length` < 200) 
+
+short_proteins_novel <- short_proteins %>% 
+  filter(grepl(prot_id,pattern="frame")) 
+```

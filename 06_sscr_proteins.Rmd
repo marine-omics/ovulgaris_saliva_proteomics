@@ -1,0 +1,133 @@
+---
+title: "Toxin Tables"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning = FALSE,error = FALSE,message = FALSE,fig.pos="h")
+library(tidyverse)
+library(splitstackshape)
+source("R/utils.R")
+library(ComplexHeatmap)
+```
+
+## Short Secreted Cysteine Rich Proteins
+
+These proteins are identified by;
+
+1. Presence of a Signal Peptide
+2. Short (<150AA)
+3. Cysteine Rich (Presence of a Cysteine rich region) / And/Or (>3% Cysteines)
+
+
+```{r, data_prep}
+sscr_mq_data <- load_sscr_proteins()
+sample_data <- readxl::read_excel("raw_data/maxquant/sample_data.xlsx")
+
+#Aggregate to group level for plotting abundances
+
+agg_fun <- function(values){
+  if(class(values)=="character"){
+      return(paste(unique(values),collapse=";"))
+  } else {
+    return(mean(values,na.rm = TRUE))
+  }
+}
+
+
+sscr_by_sample <- sscr_mq_data %>% 
+  gather("sample","LFQ",tidyselect::contains("LFQ intensity ")) %>% 
+  select(-contains('iBAQ')) %>% 
+  mutate(sample = extract_sample_codes(sample)) %>% 
+  left_join(sample_data,by=c("sample"="sample_code")) %>% 
+  group_by(group_id,sample) %>% 
+  summarise_all(agg_fun)  %>%
+  replace_na(list(LFQ = NA)) %>%  
+  select(-sample_type,-sample_order,-individual,-tissue) %>% 
+  spread(sample,LFQ) %>% 
+  clean_desc("NP1","NP1") %>% 
+  clean_desc("NP2","NP2") %>% 
+  clean_desc("Fibronectin","Pacifastin") %>% 
+  clean_desc("Hypothetical protein","") %>% 
+  clean_desc("PREDICTED.*","") %>% 
+  clean_desc("Ganglioside GM2 activator","GM2A") %>% 
+  clean_desc("Phospholipase","PLA2") %>% 
+  clean_desc("Neuropeptide prohormone","Neuropeptide prohormone") %>% 
+  clean_desc("NA","") %>% 
+  clean_desc("\\.","") %>% 
+  ungroup() %>% 
+  mutate(rn = seq(1:nrow(.))) %>% 
+  mutate(sscr_num = paste(c("OvSSCR_"),seq(1:nrow(.)),sep="")) %>% 
+  mutate(best_name = ifelse( Description == "" , sscr_num , Description  ))
+
+# Write out for geneious import
+#
+#write_tsv(sscr_by_sample,path = "raw_data/sscr_proteins/sscr_proteins.tsv")
+
+
+
+sscr_by_sample_matrix <- sscr_by_sample %>% 
+  ungroup() %>% 
+  select(best_name,matches("M[0-9]"),matches("[0-9]P[0-9]"),matches("S[0-9][AB]"),matches("[0-9]A[0-9]")) %>% 
+  column_to_rownames("best_name") %>% 
+  as.matrix()
+
+sscr_col_annotations <- sample_data %>% 
+  select(sample_code,sample_type) %>% 
+  column_to_rownames("sample_code") %>% as.data.frame()
+
+sscr_col_annotations <- sscr_col_annotations[colnames(sscr_by_sample_matrix),]
+sscr_row_annotations <- sscr_by_sample %>% select(best_name,is_ceph_specific) %>% column_to_rownames("best_name") %>% as.data.frame()
+
+
+```
+
+Construct a table and write out for Supp Info
+
+```{r}
+sscr_supp_table <- sscr_by_sample %>% 
+  select(abbreviated_name=best_name, sscr_num,ends_with("id"),
+         Hit_ID,Evalue,Description,database,Signal,Pfam,
+         cysteine_count,max_cysteines,`Sequence length`,is_ceph_specific)
+
+write_tsv(sscr_supp_table,"figures/supp_table_1.tsv")
+```
+
+https://en.wikipedia.org/wiki/GM2A
+
+
+```{r}
+nadist <- function(mat){
+  mat[is.na(mat)] <- 0
+  dist(mat)
+}
+
+
+pdf(file = "figures/sscr_heatmap.pdf", width = 8.5)
+
+
+column_annotation <- HeatmapAnnotation(df = data.frame(sample_type=sscr_col_annotations), 
+                                       which = "column",
+                                       annotation_legend_param = list( sample_type = list(title="Sample Type")))
+
+row_anno <-  rowAnnotation(df = sscr_row_annotations )
+
+hm <- Heatmap(sscr_by_sample_matrix, clustering_distance_columns = nadist, 
+        clustering_distance_rows = nadist, cluster_columns = FALSE,
+        split=2, 
+        row_names_side = "left", row_dend_side = "right", 
+        row_names_max_width = unit(6,"cm"),
+        top_annotation = column_annotation, 
+        
+        heatmap_legend_param = list( title = "LFQ Intensity", legend_direction = "horizontal"))
+
+# Prefer without row_anno because ceph specific is not very informative here. Just cite overall number in text
+# hm_list = hm + row_anno
+
+hm_list = hm 
+draw(hm_list,heatmap_legend_side = "bottom")
+
+dev.off()
+```
+
+

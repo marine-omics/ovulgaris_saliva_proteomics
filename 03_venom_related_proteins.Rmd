@@ -1,0 +1,185 @@
+---
+title: "Toxin Tables"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning = FALSE,error = FALSE,message = FALSE,fig.pos="h")
+library(tidyverse)
+library(splitstackshape)
+library(ggpubr)
+source("R/utils.R")
+library(pheatmap)
+```
+
+## Coleoid Toxin Protein families identified by Ruder and by Whitelaw
+
+Extract venom related proteins by searching for their domains in Interpro Scan results
+
+Note that the list does not include several protein types that were not found. This includes;
+
+- Tachykinins
+- SE-cephalotoxin
+- DNase
+
+
+```{r, data_prep}
+mq_data <- load_mq_annotated()
+interproscan_data <- load_interpro()
+sscr_proteins <- load_sscr_proteins()
+
+cap_proteins <- interproscan_data %>% filter(ipr_accession=="PF00188") %>% pull(prot_id) %>% unique()
+sscr_proteins <- sscr_proteins %>% pull(prot_id) %>% unique()
+chitinases <- interproscan_data %>% filter(ipr_accession=="PS01095") %>% pull(prot_id) %>% unique()
+#carboxypeptidases <- interproscan_data %>% filter(grepl(ipr_description,pattern = "[Cc]arboxypeptidase")) %>% pull(prot_id) %>% unique()
+metalloproteases <- interproscan_data %>% filter(grepl(ipr_description,pattern = "[Mm]etalloprotease")) %>% pull(prot_id) %>% unique()
+hyaluronidases <- interproscan_data %>% filter(ipr_accession=="PF01630") %>% pull(prot_id) %>% unique()
+pacifastins <- interproscan_data %>% filter(grepl(ipr_description,pattern = "[Pp]acifastin")) %>% pull(prot_id) %>% unique()
+pla2 <- interproscan_data %>% filter(grepl(ipr_description,pattern = "[Pp]hospholipase A2")) %>% pull(prot_id) %>% unique()
+serine_proteases <- interproscan_data %>% filter(grepl(ipr_description,pattern = "[Ss]erine protease")) %>% pull(prot_id) %>% unique()
+
+venom_related_prot_ids <- list(cap_proteins,chitinases,metalloproteases,hyaluronidases,pacifastins,pla2,serine_proteases)
+names(venom_related_prot_ids) <- c("CAP","Chitinase","Metalloprotease","Hyaluronidase","Pacifastin","PLA2","Serine_protease")
+
+venom_related_mq_data <- do.call(rbind,lapply(names(venom_related_prot_ids),function(family_name){
+  mq_data %>% filter(prot_id %in% venom_related_prot_ids[[family_name]]) %>% add_column(Family=family_name)
+}))
+```
+
+```{r}
+venom_related_mq_data %>% pull(group_id) %>% n_distinct()
+```
+
+Aggregate to group level for plotting abundances
+
+```{r}
+agg_fun <- function(values){
+  if(class(values)=="character"){
+      return(paste(unique(values),collapse=";"))
+  } else {
+    return(mean(values,na.rm = TRUE))
+  }
+}
+
+venom_related_mq_data_grouped <- venom_related_mq_data %>% 
+  group_by(group_id) %>% 
+  summarise_all(agg_fun)
+```
+
+Write data to a table
+
+```{r}
+
+agg_concat <- function(values){
+  return(paste(unique(values),collapse=";"))
+}
+
+venom_related_mq_data_grouped_pubtable <- venom_related_mq_data %>%
+  mutate(Evalue = as.numeric(Evalue)) %>% 
+  mutate(ranker = ifelse(is.na(Evalue), 0, Evalue)) %>% 
+  group_by(group_id) %>% 
+  mutate(prot_id = agg_concat(prot_id), 
+         transcript_id = agg_concat(transcript_id),
+         Family = agg_concat(Family),
+         Pfam= agg_concat(Pfam)) %>% 
+  top_n(1,desc(ranker)) %>% 
+  summarise_all(first) %>% 
+  select(group_id,prot_id,gene_id,transcript_id,best_blastp_hit = Hit_ID,Evalue,database,Family, Signal, cysteine_count, max_cysteines)
+
+write_tsv(venom_related_mq_data_grouped_pubtable,path = "figures/supp_table_2.tsv")
+```
+
+Transform data for a barplot
+
+Serine proteases are left off this plot because they are so diverse and abundant that they dominate the plot
+
+```{r}
+venom_related_by_sample <- venom_related_mq_data_grouped %>% 
+  gather("sample","iBAQ",contains("iBAQ ")) %>% 
+  select(-contains('LFQ')) %>% 
+  mutate(sample = str_match(sample,pattern = "([0-9][AP][0-9]|S[0-9][AB]|M[1-3])")[,2]) %>% 
+  mutate(sample_type = str_extract(sample, pattern = "[APSM]")) %>% 
+  group_by(group_id,sample_type) %>% 
+  summarise_all(agg_fun)  %>%
+  ungroup() %>% 
+  group_by(sample_type) %>% 
+  unite("Description",Pfam,Description,sep = ";") %>% 
+  filter(!is.na(iBAQ))
+
+sample_type_labels <- c("P"="Adult PSG","A"="Adult ASG","S"="Paralarval PSG","M"="Saliva")
+venom_related_by_sample$sample_type <- sample_type_labels[venom_related_by_sample$sample_type]
+
+#%>% filter(Family!="Serine_protease")
+vbs <- venom_related_by_sample %>% filter(Family!="Serine_protease")
+
+gp_vr <- ggplot(venom_related_by_sample %>% filter(Family!="Serine_protease") ,aes(x=Family,y=iBAQ,group=group_id)) +
+  geom_col(aes(fill=Family,colour=group_id)) + 
+  theme(legend.position = "bottom") + 
+  coord_flip() + 
+  facet_wrap(~sample_type, scales = "free_x", nrow = 1) + 
+  scale_colour_grey(start=0.2,end=0.3) + 
+  guides(colour=FALSE,fill=FALSE) + 
+  xlab("") + 
+  theme_pubclean() +
+  theme(text = element_text(size=6.5)) +
+  theme(axis.text.x = element_text(angle=90))
+
+ggsave("figures/venom_related_proteins.pdf",gp_vr, width=8.5, height=6,units = c("cm"))
+```
+
+Calculate abundance of Families as a proportion of total iBAQ signal.
+
+```{r}
+family_order <- c("Serine_protease"=1,"CAP"=2,"Pacifastin"=3,"Hyaluronidase"=4,"Chitinase"=5,"PLA2"=6,"Metalloprotease"=7)
+
+venom_related_summary <- venom_related_by_sample %>% 
+  group_by(sample_type) %>% 
+  mutate(iBAQ_total = sum(iBAQ)) %>% 
+  ungroup() %>% 
+  group_by(sample_type,Family,group_id) %>% 
+  summarise(relative_abundance = sum(iBAQ)/first(iBAQ_total)) %>% 
+  mutate(family_order = family_order[Family])
+
+gp_bar <- ggplot(venom_related_summary, aes(x=sample_type,y=relative_abundance)) +
+  geom_col(aes(fill=Family), size=0.5) + 
+  coord_flip() + 
+  guides(colour=FALSE) + 
+  xlab("") + 
+  ylab("Proportion of total iBAQ intensity") +
+  theme_pubclean() +
+  theme(legend.key.size = unit(4,"mm"), legend.title = element_blank()) + 
+  theme(legend.position = "right") +
+  theme(text = element_text(size=7)) +
+  
+  theme(axis.text.x = element_text(angle=90))
+
+ggsave("figures/venom_related_proteins.pdf",gp_bar, width=10, height=6,units = c("cm"))
+```
+
+
+Try this as a heatmap
+
+```{r}
+venom_related_mq_data_by_family <- venom_related_mq_data_grouped %>% 
+  filter(!(Family %in% c("Serine_protease"))) %>% 
+  mutate(Family = ifelse(grepl(Family,pattern="Carboxypeptidase",ignore.case = TRUE),"Carboxypeptidase",Family)) %>% 
+  arrange(Family)
+
+venom_related_lfq_matrix <- venom_related_mq_data_by_family %>% 
+  select(prot_id,contains("LFQ")) %>% 
+  column_to_rownames('prot_id') %>% 
+  as.matrix() %>% log2()
+
+venom_related_lfq_matrix[!is.finite(venom_related_lfq_matrix)] <- 0
+
+venom_related_annotations <- venom_related_mq_data_by_family %>% select(prot_id,Family) %>% column_to_rownames("prot_id") %>% as.data.frame()
+
+colnames(venom_related_lfq_matrix)  <-  str_match(colnames(venom_related_lfq_matrix),"([12][PA][1-3]|M[1-3]|S[1-3][AB])")[,2]
+
+png(file = "figures/venom_related_heatmap.png",width=1000,height = 1200)
+ph <- pheatmap(venom_related_lfq_matrix,annotation_row = venom_related_annotations, show_rownames = FALSE, cluster_rows = TRUE)
+grid::grid.draw(ph$gtable)
+dev.off()
+```
+
+

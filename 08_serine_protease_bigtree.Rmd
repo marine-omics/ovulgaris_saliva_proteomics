@@ -1,0 +1,165 @@
+---
+title: "Serine Protease Tree"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggtree)
+library(ape)
+library(phangorn)
+#source("https://bioconductor.org/biocLite.R")
+#biocLite("ggtree")
+source("R/utils.R")
+```
+
+
+
+```{r, prepare_data}
+tree <-  read.tree("raw_data/serine_proteases/sp1_200_molluscs_v2.fasta.contree")
+tip_data <- serine_protease_treedata()
+
+tree$tip.label <- tree$tip.label %>% str_replace_all(pattern = "_-_PF00089", replacement = "")
+```
+
+As a useful aside we save a table of all sequences and metadata used for the tree.  This might form a supplementary table for the paper
+
+```{r}
+write_tsv(tip_data,"figures/tree_sequences.tsv")
+```
+
+Plot the big tree unrooted 
+
+```{r}
+tip_data$Order <- factor(tip_data$Order, levels = c("Octopus","Cuttlefish","Squid","Gastropod","Bivalve"))
+```
+
+```{r}
+bootstrap_nodes <- c(337,336,504,335,334,512,612,533,625,330)
+
+sp_unrooted <- ggtree(tree,size=0.1, layout="unrooted") %<+% tip_data + 
+#  geom_text2(aes(subset = !isTip, label=node), hjust=1.2, vjust = -0.5, size=1) + # Uncomment to show node labels
+  #  geom_tiplab(aes(label=simple_label,color=Order),size=1) + 
+#  geom_text2(aes(subset = (!isTip & label>90), label=label), hjust=1.2, vjust = -0.5, size=2, check_overlap = TRUE) + 
+  geom_text2(aes(subset = (!isTip & node %in% bootstrap_nodes), label=label), hjust=1.2, vjust = -0.5, size=2, check_overlap = TRUE) +   
+  geom_tippoint(aes(color=Order)) +
+#  geom_hilight_encircle(node=337) +
+  scale_color_manual(values=  c("Octopus"="#FFB7B7","Cuttlefish"="#FF7474","Squid"="#FF0001","Gastropod"="#5DB330","Bivalve"="#3283EA")) +
+  theme(legend.position=c(0.8,0.2), legend.text = element_text(size=7,face = "italic"), legend.title = element_blank(),legend.key.size = unit(2,"mm")) +
+  guides(color = guide_legend(override.aes = list(size = 3)))
+
+
+ggsave(sp_unrooted,filename = "figures/serine_proteases_unrooted_tree.png", width = 17.8, height = 17, units = "cm")
+```
+
+
+Plot big tree unrooted in simplified form suitable for graphical abstract
+
+```{r}
+tip_data_simplified <- tip_data %>% 
+  mutate(Class = ifelse( Order %in% c("Octopus", "Cuttlefish", "Squid"), "Cephalopod", as.character(Order))  ) 
+
+sp_unrooted_simple <- ggtree(tree,size=0.1, layout="unrooted") %<+% tip_data_simplified + 
+  geom_tippoint(aes(color=Class),size=0.5) +
+  geom_hilight_encircle(node=336) +
+#  geom_hilight_encircle(node=504) +
+  scale_color_manual(values=  c("Cephalopod"="#FF0001","Gastropod"="#5DB330","Bivalve"="#3283EA")) +
+  theme(legend.position=c(0.8,0.1),legend.background = element_rect(fill="transparent"), legend.text = element_text(size=6, family = "Helvetica"), legend.title = element_blank(),legend.key.size = unit(2,"mm")) 
+
+#+  guides(color = guide_legend(override.aes = list(size = 3)))
+
+ggsave(sp_unrooted_simple,filename = "figures/serine_proteases_unrooted_tree_toc.pdf", width = 5, height = 5, units = "cm")
+```
+
+
+
+
+
+
+
+
+
+
+
+<!-- First plot a large tree with all species -->
+
+<!-- ```{r} -->
+<!-- rtree <- midpoint(tree) -->
+
+<!-- tip_data$Order <- factor(tip_data$Order,levels = c("Octopus","Cuttlefish","Squid","Gastropod","Bivalve")) -->
+
+<!-- sp_tree_plot <- ggtree(rtree,size=0.1) %<+% tip_data +  geom_tiplab(aes(label=simple_label,color=Order),size=1) + -->
+<!--   geom_text2(aes(subset = !isTip, label=label), hjust=1.2, vjust = -0.5, size=1) + # Uncomment to show node labels. This tell us that node 337 is what we want for the detailed tree -->
+<!-- #  geom_text2(aes(subset = !isTip, label=node), hjust=1.2, vjust = -0.5, size=1) +  -->
+<!--     geom_treescale(offset = -2) +  -->
+<!--   theme(legend.position=c(0.8,0.7), legend.text = element_text(size=7,face = "italic"), legend.title = element_blank(), -->
+<!--         legend.key.size = unit(2,"mm")) + -->
+<!--   xlim(0,3.30) +  -->
+<!--   #scale_color_manual(values=  c("Octopus"="#FF7E79","Cuttlefish"="#FF9300","Squid"="#FFD479","Gastropod"="#0096FF","Bivalve"="#942193")) + -->
+<!--                                       guides(color = guide_legend(override.aes = list(size = 3))) -->
+
+<!-- ggsave(sp_tree_plot,filename = "figures/serine_proteases_tree.png", width = 17.8, height = 20, units = "cm") -->
+<!-- ``` -->
+
+<!-- Plot the same tree unrooted to use as an inset -->
+
+<!-- ```{r} -->
+<!-- sp_unrooted_tree_plot <- ggtree(tree,size=0.1, layout="equal_angle", aes(color=Order)) %<+% tip_data + -->
+<!--   theme(legend.position=c(0.8,0.7), legend.text = element_text(size=7,face = "italic"), legend.title = element_blank(), -->
+<!--         legend.key.size = unit(2,"mm")) + -->
+<!--   geom_cladelabel(node=337, "A") +  -->
+<!-- #  xlim(0,3.30) +  -->
+<!--   scale_color_manual(values=  c("Octopus"="#FF7E79","Cuttlefish"="#FF9300","Squid"="#FFD479","Gastropod"="#0096FF","Bivalve"="#942193")) + -->
+<!--                                       guides(color = guide_legend(override.aes = list(size = 3))) -->
+<!-- ggsave(sp_unrooted_tree_plot,filename = "figures/serine_proteases_unrooted_tree.png", width = 17.8, height = 20, units = "cm") -->
+<!-- ``` -->
+
+
+<!-- Try plotting this with clade 335 collapsed -->
+
+<!-- ```{r} -->
+<!-- sp_tree_plot_cc <- collapse(sp_tree_plot,335) +  -->
+<!--   geom_point2(aes(subset=(node == 335)), size=5, shape=23, fill="steelblue") + -->
+<!--   geom_text2(aes(subset=(node == 335)), label="Cephalopod, Bivalve and Gastropod Serine Proteases", hjust=-0.2)  -->
+
+
+
+<!-- ggsave(flip(sp_tree_plot_cc,335,509), filename = "figures/serine_proteases_tree_cc.png",width = 17.8, height = 60, units = "cm") -->
+<!-- ``` -->
+
+Now extract clade 337
+
+```{r}
+
+sp337_tree <- extract.clade(tree,337)
+
+
+sp337_tree_plot <- ggtree(sp337_tree) %<+% tip_data +  geom_tiplab(aes(label=simple_label,color=Species)) +
+  geom_text2(aes(subset = !isTip, label=label), hjust=1.2, vjust = -0.5, size=3) + # Uncomment to show node labels. This tell us that node 280 is what we want for the detailed tree
+#  geom_text2(aes(subset = !isTip, label=node), hjust=1.2, vjust = -0.5, size=3) + 
+    geom_treescale(offset = -2) + 
+  theme(legend.position=c(0.8,0.8), legend.text = element_text(face = "italic"), legend.title = element_blank()) + 
+  xlim(0,3.30) 
+
+ggsave(sp337_tree_plot,filename = "figures/serine_proteases_tree_zoom.png", width = 17.8, height = 60, units = "cm")
+```
+
+Extract sequences for this clade to make a separate analysis ( this serves as input to geneious )
+
+```{r}
+write_tsv(tip_data %>% filter(ID %in% sp337_tree$tip.label),path = "raw_data/serine_proteases/octo_sp.tsv")
+```
+
+Also write a version restricting to core taxa only
+
+```{r}
+#core_species <- c("Octopus bimaculoides","Hapalochlaena maculosa","Octopus vulgaris")
+core_species <- c("Octopus bimaculoides","Sepia officinalis","Octopus vulgaris", "Lottia gigantea","Hapalochlaena maculosa")
+#core_species <- c("Octopus bimaculoides","Sepia officinalis","Octopus vulgaris")
+
+write_tsv(tip_data %>% filter(ID %in% sp337_tree$tip.label) %>% filter(Species %in% core_species),path = "raw_data/serine_proteases/octo_core_sp.tsv")
+```
+
+
+

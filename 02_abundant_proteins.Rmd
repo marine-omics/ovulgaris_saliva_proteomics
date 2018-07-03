@@ -1,0 +1,128 @@
+---
+title: "Abundant Proteins"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning = FALSE,error = FALSE,message = FALSE,fig.pos="h")
+library(tidyverse)
+library(splitstackshape)
+library(ggpubr)
+source("R/utils.R")
+```
+
+
+```{r}
+mq_data <- load_mq_annotated()
+```
+
+
+
+```{r}
+mq_data_ibaq_matrix <- mq_data %>% select(contains('iBAQ ')) %>% log2
+boxplot(mq_data_ibaq_matrix)
+```
+
+```{r}
+mq_data_long_sample <- mq_data %>% 
+  gather("sample","iBAQ",contains("iBAQ ")) %>% 
+  select(-contains('LFQ')) %>% 
+  mutate(sample = str_match(sample,pattern = "([0-9][AP][0-9]|S[0-9][AB]|M[1-3])")[,2]) %>% 
+  mutate(sample_type = str_extract(sample, pattern = "[APSM]"))
+```
+
+Show the top most abundant proteins overall (mostly not toxins)
+
+```{r}
+top_by_sample <- mq_data_long_sample %>% 
+  group_by(group_id,sample_type) %>% 
+  summarise(iBAQ = mean(iBAQ,na.rm = TRUE),
+#            group_id = unique(group_id),
+            Pfam = paste( unique(Pfam), collapse = ";"),
+            Description = paste( unique(Description), collapse = ";")
+            )  %>%
+  ungroup() %>% 
+  group_by(sample_type) %>% 
+  top_n(40,iBAQ) %>% 
+  unite("Description",Pfam,Description,sep = ";")
+```
+
+
+```{r}
+clean_desc <- function(data,pattern,replacement){
+    data %>% mutate(Description = ifelse(grepl(Description,pattern=pattern,ignore.case = TRUE),replacement,Description))
+}
+
+top40_data <- top_by_sample %>% 
+  clean_desc("Histone","Histone") %>% 
+  clean_desc("Trypsin","Serine protease") %>% 
+  clean_desc("Actin","Actin") %>% 
+  clean_desc("Myosin","Myosin") %>%   
+  clean_desc("Hemocyanin","Hemocyanin") %>%   
+  clean_desc("[Hh]ypothetical","Uncharacterized") %>% 
+  clean_desc("uncharacterized","Uncharacterized") %>% 
+  clean_desc("alphaM","alpha 2-macroglobulin") %>% 
+  clean_desc("tropomyosin","Tropomyosin") %>% 
+  clean_desc("Clathrin light chain","Clathrin light chain") %>% 
+  clean_desc("Cysteine-rich secretory","Cysteine-rich secretory protein") %>% 
+  clean_desc("Ribosomal protein","Ribosomal protein") %>% 
+  clean_desc("Glyceraldehyde 3-phosphate dehydrogenase","Glyceraldehyde-3-phosphate dehydrogenase") %>% 
+  clean_desc("Glyceraldehyde-3-phosphate dehydrogenase","Glyceraldehyde-3-phosphate dehydrogenase") %>% 
+  clean_desc("Elongation factor","Elongation factor") %>% 
+  clean_desc("14-3-3 protein","14-3-3 protein") %>% 
+  clean_desc("Intermediate filament","Intermediate filament") %>% 
+  clean_desc("guanido phosphotransferase","Guanido phosphotransferase") %>% 
+  clean_desc("Tubulin","Tubulin") %>% 
+  clean_desc("Calpain","Calpain") %>% 
+  clean_desc("Thioredoxin","Thioredoxin") %>% 
+  clean_desc("Macrophage migration inhibitory factor","Macrophage migration inhibitory factor") %>% 
+  clean_desc("Carboxypeptidase activation peptide","Carboxypeptidase activation peptide") %>% 
+  clean_desc("Glutathione S-transferase","Glutathione S-transferase") %>% 
+  clean_desc("Tyrosinase","Tyrosinase") %>% 
+  clean_desc("Calponin homology","Calponin homology (CH) domain") %>% 
+  clean_desc("ATP synthase","ATP synthase") %>% 
+  clean_desc("Kallikrein 1-related peptidase","Kallikrein 1-related peptidase") %>% 
+  clean_desc("Glyceraldehyde-3-phosphate dehydrogenase","Glyceraldehyde-3-phosphate dehydrogenase") %>% 
+  clean_desc("Arginine kinase","Arginine kinase") %>% 
+  clean_desc("70 kDa neurofilament protein-like","70 kDa neurofilament protein-like") %>% 
+  clean_desc("von Willebrand factor-like","von Willebrand factor-like") %>% 
+  clean_desc("Nucleoside diphosphate kinase","Nucleoside diphosphate kinase") %>% 
+  clean_desc("EF-hand","EF-hand domain containing") %>% 
+  clean_desc("cis-trans isomerase","Peptidyl-prolyl cis-trans isomerase") %>% 
+  clean_desc("Methyltransferase","Methyltransferase") %>% 
+  clean_desc("histidine-rich glycoprotein-like","Histidine-rich glycoprotein-like") %>% 
+  clean_desc("Cystatin","Cystatin domain containing") %>% 
+  clean_desc("Hsp70 protein","Hsp70 protein") %>% 
+  clean_desc("Eukaryotic porin","Eukaryotic porin") %>% 
+  clean_desc("Thyroglobulin type-1 repeat","Thyroglobulin type-1 repeat containing protein") %>% 
+  clean_desc("Universal stress protein","Universal stress protein") %>% 
+  clean_desc("Fructose-bisphosphate aldolase","Fructose-bisphosphate aldolase") %>% 
+  mutate(Description = ifelse(grepl(Description,pattern="NA",ignore.case = TRUE),"Uncharacterized",Description)) 
+```
+
+
+
+
+```{r}
+top40_plot_data <- top40_data %>% ungroup() %>% group_by(group_id) %>% add_tally(wt=iBAQ)
+top40_plot_data$Description <- reorder(factor(top40_plot_data$Description),top40_plot_data$iBAQ)
+
+sample_type_labels <- c("P"="Adult PSG","A"="Adult ASG","S"="Paralarval PSG","M"="Saliva")
+top40_plot_data$sample_type <- sample_type_labels[top40_plot_data$sample_type]
+
+gp <- ggplot(top40_plot_data,aes(x=Description,y=iBAQ,group=group_id)) + 
+  geom_col(aes(fill=Description,colour=group_id)) + 
+  theme(legend.position = "bottom") + 
+  coord_flip() + 
+  facet_wrap(~sample_type, scales="free_x",nrow = 1) + 
+  scale_colour_grey(start=0.2,end=0.3) + 
+  guides(colour=FALSE,fill=FALSE) + 
+  xlab("") + 
+  theme_pubclean() +
+  theme(text = element_text(size=8)) +
+  theme(axis.text.x = element_text(angle=90)) #+ scale_y_log10()
+
+# See instructions to authors.  This makes a figure that is sized to fit in two columns
+#
+ggsave("figures/abundant_proteins.pdf",gp, width=17, height=14,units = c("cm"))
+```

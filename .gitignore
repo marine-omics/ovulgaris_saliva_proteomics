@@ -1,3 +1,8 @@
+cache
+figures/*.pdf
+figures/*.png
+figures/*.tsv
+figures/*.xlsx
 hpc
 raw_data
 

@@ -1,0 +1,69 @@
+---
+title: "Serine Protease Tree"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggtree)
+library(ape)
+library(phangorn)
+source("R/utils.R")
+```
+
+
+
+```{r, prepare_data}
+tree <-  read.tree("raw_data/serine_proteases/octo_sepoff_sp1_200_v2_aligned.fasta.contree")
+
+tip_data <- serine_protease_treedata()
+
+tree$tip.label <- tree$tip.label %>% str_replace_all(pattern = "_-_PF00089", replacement = "")
+```
+
+Load quant data that matches sequences in the tree
+
+```{r}
+mq_data <-  lognorm_lfq(load_mq_annotated()) %>% 
+  mutate(prot_id = str_replace_all(prot_id,pattern = "[\\|\\:]","_")) %>% 
+  filter(prot_id %in% tree$tip.label)
+
+mq_data_matrix <- mq_data %>% 
+  select(prot_id,contains("LFQ")) %>% 
+  column_to_rownames('prot_id') %>% 
+  as.data.frame()
+
+# mq_data_matrix <- mq_data %>% 
+#   select(prot_id,contains("iBAQ ")) %>% 
+#   column_to_rownames('prot_id') %>% 
+#   as.data.frame() %>% log2()
+
+colnames(mq_data_matrix) <- extract_sample_codes(colnames(mq_data_matrix))
+col_order <- c("1A1","1A2","1A3","2A1","M1", "M2", "M3", "1P1", "1P2", "1P3",  "2P1", "2P2", "2P3", "S1A", "S1B", "S2A", "S2B", "S3A", "S3B")
+#col_names <- c("ASG_1","ASG_1","ASG_1","ASG_2","Saliva", "Saliva", "Saliva", "Adult PSG 1", "Adult PSG 1", "Adult PSG 1",  "Adult PSG 2", "Adult PSG 2", "Adult PSG 2", "1 Day PSG", "1 Day PSG", "20 Day PSG", "20 Day PSG", "30 Day PSG", "30 Day PSG")
+mq_data_matrix <- mq_data_matrix[tree$tip.label,col_order]
+#colnames(mq_data_matrix) <- col_names
+```
+
+First plot a large tree with all species
+
+```{r}
+root_id <- tip_data %>% filter(simple_label=="Lotgi_40") %>% pull(original_id) %>% str_extract("L.*")
+
+#rtree <- midpoint(tree)
+rtree <- root(tree,root_id)
+
+sp_tree_plot <- ggtree(rtree) %<+% tip_data +  geom_tiplab(aes(label=simple_label,color=Species),size=1.5, linesize = 0.5) +
+  theme_tree2()+
+  geom_text2(aes(subset = !isTip, label=label), hjust=1.2, vjust = -0.5, size=1.5) +  
+  geom_treescale(offset = -2) + 
+  theme(legend.position=c(0.8,0.8), legend.text = element_text(face = "italic"), legend.title = element_blank()) + 
+  theme(text = element_text(size=8)) +
+  xlim(0,4.6) 
+
+sp_tree_hp_plot <- gheatmap(sp_tree_plot,mq_data_matrix, offset = 0.3, width=0.45,font.size=2,colnames_angle=90, colnames_offset_y = -3)
+
+ggsave(sp_tree_hp_plot,filename = "figures/serine_proteases_tree_hm.png", width = 17.8, height = 16, units = "cm")
+```
+

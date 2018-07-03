@@ -1,0 +1,37 @@
+---
+title: "R Notebook"
+output: html_document
+---
+
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+```
+
+```{r}
+novel <- read_tsv("raw_data/novel_length.txt",col_names = c("ID", "length")) %>% 
+  add_column(db="novel")
+
+known <- read_tsv("raw_data/known_length.txt",col_names = c("ID", "length")) %>% 
+  add_column(db="known")
+
+known_novel <- rbind(novel, known) 
+```   
+
+```{r}
+known_novel_plot <- ggplot(data=known_novel, aes(x=length)) + 
+  geom_density(aes(fill=db),alpha=0.5) + 
+  xlim(0,500) + 
+  xlab("Sequence Length") + 
+  ylab("Density of Sequences") + 
+  theme_pubclean() +
+  theme(legend.title = element_blank()) + 
+  theme(text = element_text(size=6)) +
+  theme(legend.position = c(.8, .8)) 
+  
+
+ggsave(known_novel_plot, filename = "figures/known_novel_length.pdf", width = 8.5, height = 7, units = "cm")
+```
+
