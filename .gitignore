@@ -5,6 +5,7 @@ figures/*.tsv
 figures/*.xlsx
 hpc
 raw_data
+bin
 
 # History files
 .Rhistory
@@ -24,6 +25,7 @@ raw_data
 
 # RStudio files
 .Rproj.user/
+.Rproj
 
 # produced vignettes
 vignettes/*.html

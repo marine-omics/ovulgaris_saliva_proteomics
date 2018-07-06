@@ -47,10 +47,17 @@ db_cys_plot <- ggplot(cr_data_plottable,aes(x=max_cysteines)) +
   labs(colour= "Window Size") +
   xlab("Cysteine Richness Index (CRI)") +
   ylab("Density of Sequences") + 
-  theme(text = element_text(size=6))
+  theme(text = element_text(size=10))
 
 
-ggsave(db_cys_plot, filename = "figures/db_cyst_plot.png", width = 8.3, height = 10, units = "cm")  
+ggsave(db_cys_plot, filename = "figures/db_cyst_plot.pdf", width = 8.3, height = 10, units = "cm")  
+
+ggsave(db_cys_plot, filename = "figures/cysteine_figure_s1.pdf", width = 14, height = 15, units = "cm")  
+
+
+
+
+
 ```
 
 

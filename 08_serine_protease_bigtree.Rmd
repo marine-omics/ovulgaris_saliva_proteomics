@@ -20,6 +20,13 @@ source("R/utils.R")
 tree <-  read.tree("raw_data/serine_proteases/sp1_200_molluscs_v2.fasta.contree")
 tip_data <- serine_protease_treedata()
 
+tissue_expression_data <- readxl::read_excel("figures/tree_sequences.xlsx") %>% 
+  select(ID,Expression) %>% 
+  mutate(PSG = ifelse(Expression=="PSG","YES","NO"))
+
+tip_data <- tip_data %>% left_join(tissue_expression_data)
+
+
 tree$tip.label <- tree$tip.label %>% str_replace_all(pattern = "_-_PF00089", replacement = "")
 ```
 
@@ -36,21 +43,26 @@ tip_data$Order <- factor(tip_data$Order, levels = c("Octopus","Cuttlefish","Squi
 ```
 
 ```{r}
-bootstrap_nodes <- c(337,336,504,335,334,512,612,533,625,330)
+# ,619,629,327,636,,629,
+bootstrap_nodes <- c(337,336,335,334,333,332,512,523,330,509,523,574,596,620,629,626,430,433,340,341,367539,434,504,539,368,453)
 
 sp_unrooted <- ggtree(tree,size=0.1, layout="unrooted") %<+% tip_data + 
 #  geom_text2(aes(subset = !isTip, label=node), hjust=1.2, vjust = -0.5, size=1) + # Uncomment to show node labels
   #  geom_tiplab(aes(label=simple_label,color=Order),size=1) + 
-#  geom_text2(aes(subset = (!isTip & label>90), label=label), hjust=1.2, vjust = -0.5, size=2, check_overlap = TRUE) + 
-  geom_text2(aes(subset = (!isTip & node %in% bootstrap_nodes), label=label), hjust=1.2, vjust = -0.5, size=2, check_overlap = TRUE) +   
-  geom_tippoint(aes(color=Order)) +
-#  geom_hilight_encircle(node=337) +
-  scale_color_manual(values=  c("Octopus"="#FFB7B7","Cuttlefish"="#FF7474","Squid"="#FF0001","Gastropod"="#5DB330","Bivalve"="#3283EA")) +
-  theme(legend.position=c(0.8,0.2), legend.text = element_text(size=7,face = "italic"), legend.title = element_blank(),legend.key.size = unit(2,"mm")) +
+#  geom_text2(aes(subset = (!isTip & label>90), label=label), hjust=-0.2, vjust = 0.0, size=1,color="green") + 
+  geom_nodelab(aes(subset = (label > 90) & (node %in% bootstrap_nodes), label=label), hjust=-0.2, vjust = 0.0, size=2, check_overlap = FALSE) +   
+  geom_nodepoint(aes(subset = (label > 90) & (node %in% bootstrap_nodes)), size=1) +   
+  geom_tippoint(aes(color=Order,fill=Order,shape=PSG)) + scale_shape_manual(values=c("YES"=1,"NO"=21)) +
+  geom_hilight_encircle(node=337) +
+  guides(fill=FALSE,shape=FALSE) +
+  scale_color_manual(values=  c("Octopus"="#FFB7B7","Cuttlefish"="#FF7474","Squid"="#FF0207","Gastropod"="#5DB330","Bivalve"="#3283EA")) +
+  scale_fill_manual(values=  c("Octopus"="#FFB7B7","Cuttlefish"="#FF7474","Squid"="#FF0207","Gastropod"="#5DB330","Bivalve"="#3283EA")) +
+    theme(legend.position=c(0.8,0.2), legend.text = element_text(size=7,face = "italic"), legend.title = element_blank(),legend.key.size = unit(2,"mm")) +
   guides(color = guide_legend(override.aes = list(size = 3)))
 
 
-ggsave(sp_unrooted,filename = "figures/serine_proteases_unrooted_tree.png", width = 17.8, height = 17, units = "cm")
+ggsave(sp_unrooted,filename = "figures/serine_proteases_unrooted_tree.png", width = 17.8, height = 14, units = "cm")
+ggsave(sp_unrooted,filename = "figures/serine_proteases_unrooted_tree.pdf", width = 17.8, height = 14, units = "cm")
 ```
 
 
